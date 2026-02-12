@@ -33,7 +33,12 @@ import yaml
 from mistapi.api import v1 as mist
 from pprint import pprint
 
-from utils import load_config_from_yaml
+# Reload utils module to pick up changes
+import importlib
+import utils
+importlib.reload(utils)
+
+from utils import load_config_from_yaml, save_config_to_yaml
 
 # ### Step 1.2 - Load Environment Variables
 #
@@ -67,8 +72,8 @@ print(f"Using token: {token[:8]}...")
 # %%
 # Step 1.4 - Get org info using token auth
 self_uri = "api/v1/self"
-self_data = session.get(mist_api_root + self_uri)
-pprint(self_data.json())
+self_response = session.get(mist_api_root + self_uri)
+pprint(self_response.json())
 
 # ### Step 1.5 - Extract Organization ID
 #
@@ -80,9 +85,13 @@ pprint(self_data.json())
 
 # %%
 # Step 1.5 - Extract and store org_id
-org_id = self_data.json()['privileges'][0]['org_id']
+org_id = self_response.json()['privileges'][0]['org_id']
 env['org_id'] = org_id
 print(f"Organization ID: {org_id}")
+
+# Save org_id to config/env.yml immediately
+if org_id:
+    save_config_to_yaml(env)
 
 # ### Step 1.6 - List Existing Sites
 #
@@ -99,29 +108,30 @@ pprint(sites.json())
 
 # ### Step 1.7 - Retrieve Device Inventory
 #
-# The inventory endpoint (`api/v1/orgs/{org_id}/inventory`) accepts a `type`
-# parameter: `ap`, `switch`, or `gateway`. Retrieve all three.
+# **What is Mist Inventory?**
+#
+# Mist Inventory is the central repository in the Juniper Mist Cloud that tracks
+# every piece of hardware associated with your organization. It serves as the
+# "Master List" for all access points (APs), switches, and gateways (WAN Edges)
+# that have been claimed or adopted.
+#
+# Think of it as the database that manages the lifecycle of your hardware—from
+# the moment you "Claim" a device via its activation code to when it is assigned
+# to a specific site and eventually "Released."
+#
+# The inventory endpoint (`api/v1/orgs/{org_id}/inventory`) returns all devices.
+# Each device in the response includes a `type` field indicating whether it's an
+# `ap`, `switch`, or `gateway`.
 #
 # **GUI:** `Organization > Inventory: Entire Org`
 
 # %%
-# Step 1.7 - Get device inventory
-inventory_uri = mist_api_root + f"api/v1/orgs/{org_id}/inventory"
+# Step 1.7 - Get all device inventory
+inventory_uri = f"{mist_api_root}api/v1/orgs/{org_id}/inventory"
+all_devices = session.get(inventory_uri).json()
 
-ap_params = {'type': 'ap'}
-switch_params = {'type': 'switch'}
-edge_params = {'type': 'gateway'}
-
-aps = session.get(inventory_uri, params=ap_params).json()
-switches = session.get(inventory_uri, params=switch_params).json()
-edges = session.get(inventory_uri, params=edge_params).json()
-
-print("=== Access Points ===")
-pprint(aps)
-print("\n=== Switches ===")
-pprint(switches)
-print("\n=== WAN Edges ===")
-pprint(edges)
+print(f"=== All Devices (Total: {len(all_devices)}) ===")
+pprint(all_devices)
 
 # > **Q:** What is the current state of the inventory?
 # >
@@ -154,24 +164,31 @@ pprint(edges)
 
 # %%
 # Step 1.10 - Check edge inventory after SSR-1 adoption
+edge_params = {'type': 'gateway'}
 edges = session.get(inventory_uri, params=edge_params).json()
-pprint(edges)
+ssr1_device = next((device for device in edges if device.get('name') == 'SSR-1'), None)
+pprint(ssr1_device)
 
 # ### Step 1.11 - Record SSR-1 MAC Address
 #
 # Automatically extract the MAC address from the first edge device.
 
 # %%
-# Step 1.11 - Extract SSR-1 MAC from API response
-if edges and len(edges) > 0:
-    ssr1_mac = edges[0]['mac']
-    env['ssr1_mac'] = ssr1_mac
-    print(f"SSR-1 MAC: {ssr1_mac}")
+# Step 1.11 - Extract SSR-1 MAC from API response by device name
+
+if ssr1_device:
+    ssr1_mac = ssr1_device.get('mac')
+    if ssr1_mac:
+        env['ssr1_mac'] = ssr1_mac
+        save_config_to_yaml(env)
+        print(f"SSR-1 MAC: {ssr1_mac} - Saved to config/env.yml")
+    else:
+        print("SSR-1 device found but has no MAC address")
 else:
-    print("No edge devices found yet")
+    print("SSR-1 device not found in edge inventory")
 
 # ---
-# ### Steps 1.12-1.13: MANUAL STEP - Adopt SSR-2
+# ### Step 1.12: MANUAL STEP - Adopt SSR-2
 #
 # Repeat the adoption process for SSR-2:
 # 1. Connect via console, login as `root` / `128tRoutes`
@@ -179,76 +196,92 @@ else:
 #
 # ![ss4](../data/L04/screenshots/ss4.png)
 
-# ### Step 1.14 - Verify SSR-2 Adoption
+# ### Step 1.13 - Verify SSR-2 Adoption
 
 # %%
-# Step 1.14 - Check edges after SSR-2 adoption
+# Step 1.13 - Check edge inventory after SSR-2 adoption
 edges = session.get(inventory_uri, params=edge_params).json()
-pprint(edges)
+ssr2_device = next((device for device in edges if device.get('name') == 'SSR-2'), None)
+pprint(ssr2_device)
 
-# ### Step 1.15 - Record SSR-2 MAC Address
+# ### Step 1.14 - Record SSR-2 MAC Address
 
 # %%
-# Step 1.15 - Extract SSR-2 MAC from API response
-if edges and len(edges) > 1:
-    ssr2_mac = edges[1]['mac']
-    env['ssr2_mac'] = ssr2_mac
-    print(f"SSR-2 MAC: {ssr2_mac}")
+# Step 1.14 - Extract SSR-2 MAC from API response by device name
+if ssr2_device:
+    ssr2_mac = ssr2_device.get('mac')
+    if ssr2_mac:
+        env['ssr2_mac'] = ssr2_mac
+        save_config_to_yaml(env)
+        print(f"SSR-2 MAC: {ssr2_mac} - Saved to config/env.yml")
+    else:
+        print("SSR-2 device found but has no MAC address")
 else:
-    print("SSR-2 not found yet")
+    print("SSR-2 device not found in edge inventory")
 
 # ---
-# ### Steps 1.16-1.17: MANUAL STEP - Adopt SSR-3
+# ### Step 1.15: MANUAL STEP - Adopt SSR-3
 #
 # Repeat the adoption process for SSR-3.
 #
 # ![ss5](../data/L04/screenshots/ss5.png)
 
-# ### Step 1.18 - Verify SSR-3 Adoption
+# ### Step 1.16 - Verify SSR-3 Adoption
 
 # %%
-# Step 1.18 - Check edges after SSR-3 adoption
+# Step 1.16 - Check edge inventory after SSR-3 adoption
 edges = session.get(inventory_uri, params=edge_params).json()
-pprint(edges)
+ssr3_device = next((device for device in edges if device.get('name') == 'SSR-3'), None)
+pprint(ssr3_device)
 
-# ### Step 1.19 - Record SSR-3 MAC Address
+# ### Step 1.17 - Record SSR-3 MAC Address
 
 # %%
-# Step 1.19 - Extract SSR-3 MAC from API response
-if edges and len(edges) > 2:
-    ssr3_mac = edges[2]['mac']
-    env['ssr3_mac'] = ssr3_mac
-    print(f"SSR-3 MAC: {ssr3_mac}")
+# Step 1.17 - Extract SSR-3 MAC from API response by device name
+if ssr3_device:
+    ssr3_mac = ssr3_device.get('mac')
+    if ssr3_mac:
+        env['ssr3_mac'] = ssr3_mac
+        save_config_to_yaml(env)
+        print(f"SSR-3 MAC: {ssr3_mac} - Saved to config/env.yml")
+    else:
+        print("SSR-3 device found but has no MAC address")
 else:
-    print("SSR-3 not found yet")
+    print("SSR-3 device not found in edge inventory")
 
 # ---
-# ### Steps 1.20-1.21: MANUAL STEP - Adopt SSR-4
+# ### Step 1.18: MANUAL STEP - Adopt SSR-4
 #
 # Repeat the adoption process for SSR-4.
 #
 # ![ss6](../data/L04/screenshots/ss6.png)
 
-# ### Step 1.22 - Verify SSR-4 Adoption
+# ### Step 1.19 - Verify SSR-4 Adoption
 
 # %%
-# Step 1.22 - Check edges after SSR-4 adoption
+# Step 1.19 - Check edge inventory after SSR-4 adoption
 edges = session.get(inventory_uri, params=edge_params).json()
-pprint(edges)
+ssr4_device = next((device for device in edges if device.get('name') == 'SSR-4'), None)
+pprint(ssr4_device)
 
-# ### Step 1.23 - Record SSR-4 MAC Address
+# ### Step 1.20 - Record SSR-4 MAC Address
 
 # %%
-# Step 1.23 - Extract SSR-4 MAC from API response
-if edges and len(edges) > 3:
-    ssr4_mac = edges[3]['mac']
-    env['ssr4_mac'] = ssr4_mac
-    print(f"SSR-4 MAC: {ssr4_mac}")
+# Step 1.20 - Extract SSR-4 MAC from API response by device name
+
+if ssr4_device:
+    ssr4_mac = ssr4_device.get('mac')
+    if ssr4_mac:
+        env['ssr4_mac'] = ssr4_mac
+        save_config_to_yaml(env)
+        print(f"SSR-4 MAC: {ssr4_mac} - Saved to config/env.yml")
+    else:
+        print("SSR-4 device found but has no MAC address")
 else:
-    print("SSR-4 not found yet")
+    print("SSR-4 device not found in edge inventory")
 
 # ---
-# ### Steps 1.24-1.25: EX Switch Adoption Prerequisites
+# ### Steps 1.21-1.22: EX Switch Adoption Prerequisites
 #
 # To adopt the EX switch, you'll generate the required configuration in the Mist
 # interface and use the Juniper PyEZ Python library to apply it.
@@ -260,7 +293,7 @@ else:
 # sudo apt install -y libffi-dev libssl-dev libxml2-dev libxslt1-dev python3-dev
 # ```
 
-# ### Step 1.26: MANUAL STEP - Get EX Adoption Config
+# ### Step 1.23: MANUAL STEP - Get EX Adoption Config
 #
 # 1. Navigate to `manage.mist.com`
 # 2. Go to `Organization > Inventory > Switches`
@@ -269,7 +302,7 @@ else:
 #
 # ![ss3](../data/L04/screenshots/ss3.png)
 
-# ### Step 1.27 - Apply EX Adoption Config
+# ### Step 1.24 - Apply EX Adoption Config
 #
 # Paste the copied configuration between the triple quotes below.
 # **Remove** the final line reading `delete phone-home`.
@@ -277,7 +310,7 @@ else:
 # > **Note:** The triple quotes `"""` wrap multi-line strings in Python.
 
 # %%
-# Step 1.27 - Apply EX adoption config via PyEZ
+# Step 1.24 - Apply EX adoption config via PyEZ
 from jnpr.junos import Device
 from jnpr.junos.utils.config import Config
 
@@ -290,22 +323,23 @@ with Device(host=env['ex_ip'], user='lab', passwd='lab123') as dev:
     cu.load(config, format='set')
     cu.commit()
 
-# ### Step 1.28 - Verify Switch Adoption
+# ### Step 1.25 - Verify Switch Adoption
 #
 # **GUI:** `Organization > Inventory > Switches: Entire Org`
 
 # %%
-# Step 1.28 - Verify switch inventory
+# Step 1.25 - Verify switch inventory
+switch_params = {'type': 'switch'}
 switches = session.get(inventory_uri, params=switch_params).json()
 pprint(switches)
 
-# ### Step 1.29 - Review Environment Dictionary
+# ### Step 1.26 - Review Environment Dictionary
 
 # %%
-# Step 1.29 - Display current env
+# Step 1.26 - Display current env
 pprint(env)
 
-# ### Step 1.30 - Save Environment Data
+# ### Step 1.27 - Save Environment Data
 #
 # Save your environment data to `config/env.yml` for use in later labs.
 # The API token is excluded since it belongs in `.env`.
@@ -322,7 +356,7 @@ pprint(env)
 # ```
 
 # %%
-# Step 1.30 - Save config to env.yml
+# Step 1.27 - Save config to env.yml
 from pathlib import Path
 
 config_path = Path(__file__).resolve().parent.parent.parent / "config" / "env.yml"
@@ -335,10 +369,10 @@ with open(config_path, 'w') as f:
 
 print(f"Saved config to {config_path}")
 
-# ### Step 1.31 - Verify Saved Config
+# ### Step 1.28 - Verify Saved Config
 
 # %%
-# Step 1.31 - Read back saved config
+# Step 1.28 - Read back saved config
 with open(config_path, 'r') as f:
     print(f.read())
 
