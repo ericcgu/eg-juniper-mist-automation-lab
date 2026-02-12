@@ -250,24 +250,45 @@ else:
     print("SSR-3 device not found in edge inventory")
 
 # ---
-# ### Step 1.18: MANUAL STEP - Adopt SSR-4
+# ### Step 1.18 - Verify AP Adoption
+
+# %%
+# Step 1.18 - Check AP inventory
+ap_params = {'type': 'ap'}
+aps = session.get(inventory_uri, params=ap_params).json()
+ap = aps[0] if aps and len(aps) > 0 else None
+pprint(ap)
+
+# ### Step 1.19 - Record AP-1 MAC Address
+
+# %%
+# Step 1.19 - Extract AP-1 MAC from API response
+if ap:
+    env['ap1_mac'] = ap.get('mac')
+    save_config_to_yaml(env)
+    print(f"AP-1 MAC: {env['ap1_mac']} - Saved to config/env.yml")
+else:
+    print("AP device not found in inventory")
+
+# ---
+# ### Step 1.20: MANUAL STEP - Adopt SSR-4
 #
 # Repeat the adoption process for SSR-4.
 #
 # ![ss6](../data/L04/screenshots/ss6.png)
 
-# ### Step 1.19 - Verify SSR-4 Adoption
+# ### Step 1.21 - Verify SSR-4 Adoption
 
 # %%
-# Step 1.19 - Check edge inventory after SSR-4 adoption
+# Step 1.21 - Check edge inventory after SSR-4 adoption
 edges = session.get(inventory_uri, params=edge_params).json()
 ssr4_device = next((device for device in edges if device.get('name') == 'SSR-4'), None)
 pprint(ssr4_device)
 
-# ### Step 1.20 - Record SSR-4 MAC Address
+# ### Step 1.22 - Record SSR-4 MAC Address
 
 # %%
-# Step 1.20 - Extract SSR-4 MAC from API response by device name
+# Step 1.22 - Extract SSR-4 MAC from API response by device name
 
 if ssr4_device:
     ssr4_mac = ssr4_device.get('mac')
@@ -281,7 +302,7 @@ else:
     print("SSR-4 device not found in edge inventory")
 
 # ---
-# ### Steps 1.21-1.22: EX Switch Adoption Prerequisites
+# ### Steps 1.23-1.24: EX Switch Adoption Prerequisites
 #
 # To adopt the EX switch, you'll generate the required configuration in the Mist
 # interface and use the Juniper PyEZ Python library to apply it.
@@ -293,7 +314,7 @@ else:
 # sudo apt install -y libffi-dev libssl-dev libxml2-dev libxslt1-dev python3-dev
 # ```
 
-# ### Step 1.23: MANUAL STEP - Get EX Adoption Config
+# ### Step 1.25: MANUAL STEP - Get EX Adoption Config
 #
 # 1. Navigate to `manage.mist.com`
 # 2. Go to `Organization > Inventory > Switches`
@@ -302,7 +323,7 @@ else:
 #
 # ![ss3](../data/L04/screenshots/ss3.png)
 
-# ### Step 1.24 - Apply EX Adoption Config
+# ### Step 1.26 - Apply EX Adoption Config
 #
 # Paste the copied configuration between the triple quotes below.
 # **Remove** the final line reading `delete phone-home`.
@@ -310,12 +331,20 @@ else:
 # > **Note:** The triple quotes `"""` wrap multi-line strings in Python.
 
 # %%
-# Step 1.24 - Apply EX adoption config via PyEZ
+# Step 1.26 - Apply EX adoption config via PyEZ
 from jnpr.junos import Device
 from jnpr.junos.utils.config import Config
 
 config = """
-
+set system services ssh protocol-version v2
+set system authentication-order password
+set system login user mist class super-user
+set system login user mist authentication encrypted-password "<MASKED_PASSWORD_HASH>"
+set system login user mist authentication ssh-rsa "<MASKED_SSH_PUBLIC_KEY>"
+set system services outbound-ssh client mist device-id <MASKED_DEVICE_ID>
+set system services outbound-ssh client mist secret <MASKED_OUTBOUND_SSH_SECRET>
+set system services outbound-ssh client mist services netconf keep-alive retry 12 timeout 5
+set system services outbound-ssh client mist oc-term.ac2.mist.com port 2200 timeout 60 retry 1000
 """
 
 with Device(host=env['ex_ip'], user='lab', passwd='lab123') as dev:
@@ -323,58 +352,52 @@ with Device(host=env['ex_ip'], user='lab', passwd='lab123') as dev:
     cu.load(config, format='set')
     cu.commit()
 
-# ### Step 1.25 - Verify Switch Adoption
+# ### Step 1.27 - Verify Switch Adoption
 #
 # **GUI:** `Organization > Inventory > Switches: Entire Org`
 
 # %%
-# Step 1.25 - Verify switch inventory
+# Step 1.27 - Verify switch inventory
 switch_params = {'type': 'switch'}
 switches = session.get(inventory_uri, params=switch_params).json()
-pprint(switches)
+switch = switches[0]
+pprint(switch)
 
-# ### Step 1.26 - Review Environment Dictionary
+# ### Step 1.28 - Record EX-1 MAC Address
 
 # %%
-# Step 1.26 - Display current env
+# Step 1.28 - Extract EX-1 MAC from API response
+env['ex1_mac'] = switch.get('mac')
+save_config_to_yaml(env)
+print(f"EX-1 MAC: {env['ex1_mac']} - Saved to config/env.yml")
+
+# ### Step 1.29 - Review Environment Dictionary
+
+# %%
+# Step 1.29 - Display current env
 pprint(env)
 
-# ### Step 1.27 - Save Environment Data
+# ### Step 1.30 - Save Environment Data
 #
 # Save your environment data to `config/env.yml` for use in later labs.
 # The API token is excluded since it belongs in `.env`.
 #
 # Expected output:
 # ```yaml
-# ap1_mac: xxxxxxxxx
-# ex1_mac: xxxxxxxxxxxxxxx
-# host: xxxxxxxxx
-# org_id: 000000-000-00000000
-# ssr1_mac: xxxxxxxxxxxxxx
-# token: xxxxxxxxxxxxxxxx
-# ...
+# host: api.ac2.mist.com
+# org_id: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+# ap1_mac: xxxxxxxxxxxx
+# ex1_mac: xxxxxxxxxxxx
+# ex_ip: 10.210.6.82
+# ex_gateway: 10.210.6.86
+# mgmt_vlan: '3630'
+# vlan_1: '3680'
+# vlan_2: '3681'
+# ssr1_mac: xxxxxxxxxxxx
+# ssr2_mac: xxxxxxxxxxxx
+# ssr3_mac: xxxxxxxxxxxx
+# ssr4_mac: xxxxxxxxxxxx
 # ```
-
-# %%
-# Step 1.27 - Save config to env.yml
-from pathlib import Path
-
-config_path = Path(__file__).resolve().parent.parent.parent / "config" / "env.yml"
-
-# Exclude token from YAML (it belongs in .env)
-env_to_save = {k: v for k, v in env.items() if k != 'token'}
-
-with open(config_path, 'w') as f:
-    yaml.dump(env_to_save, f)
-
-print(f"Saved config to {config_path}")
-
-# ### Step 1.28 - Verify Saved Config
-
-# %%
-# Step 1.28 - Read back saved config
-with open(config_path, 'r') as f:
-    print(f.read())
 
 # ---
 # ## Part 2: Basic Juniper Mist Operations with Python Requests
