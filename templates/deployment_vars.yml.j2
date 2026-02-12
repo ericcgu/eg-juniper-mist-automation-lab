@@ -1,38 +1,92 @@
 ---
+# ============================================================================
+# DEPLOYMENT VARIABLES TEMPLATE
+# ============================================================================
+#
+# This file defines the ENTIRE infrastructure for a multi-site hub-and-spoke
+# SD-WAN (Software-Defined Wide Area Network) using Juniper Mist.
+#
+# NETWORK TOPOLOGY (what this builds):
+#
+#   Durham (Spoke) ─────┐                   ┌───── Westford (Spoke)
+#     SSR-1, EX-1, AP-1 │    VPN Overlay     │       SSR-2
+#     LAN: 10.99.99.0/24├───────┬───────────┤   LAN: 10.88.88.0/24
+#                        │       │           │
+#                  ┌─────┴───────┴─────┐     │
+#                  │  Sunnyvale (Hub)   │     │
+#                  │  SSR-3             ├─────┘
+#                  │  LAN: 10.66.66.0/24│
+#                  └────────┬──────────┘
+#                           │ Hub-to-Hub VPN
+#                  ┌────────┴──────────┐
+#                  │  Cupertino (Hub)   │
+#                  │  SSR-4             │
+#                  │  LAN: 10.55.55.0/24│
+#                  └───────────────────┘
+#
+# TWO-STAGE TEMPLATING:
+#   {{variable}}              → Replaced by Python/Jinja2 at render time
+#   {{'{{VARIABLE}}'}}       → Preserved as {{VARIABLE}} for Mist to replace
+#                               per-site at deployment time
+#
+# See DEPLOYMENT_VARS_EXPLAINED.md for more details on the templating system.
+# ============================================================================
+
+
+# ============================================================================
+# WAN EDGE TEMPLATES (Spoke Site Router Configurations)
+# ============================================================================
+# WAN Edge Templates define how spoke (branch) routers connect to the network.
+# Each spoke has:
+#   - WAN ports: Connect to the internet (INET) and/or private network (MPLS)
+#   - LAN ports: Connect to the local network (switches, APs, devices)
+#   - VPN tunnels: Encrypted connections back to hub sites
+#   - Service policies: Rules for which traffic goes where
+#
 wan_edge_templates:
   - name: Durham WAN Edge Template
-    type: spoke
+    type: spoke  # This site is a spoke (branch), not a hub (data center)
     sites:
-      - Durham
+      - Durham   # Which site(s) this template applies to
+    # ------ LAN IP Configuration ------
+    # Defines the gateway IP for this site's local network.
+    # {{LAN_PFX}} is a Mist variable replaced per-site (e.g., 10.99.99)
+    # So the router's LAN IP becomes 10.99.99.1 — the default gateway for
+    # all devices on this local network.
     ip_configs:
       LAN1:
         type: static
         ip: "{{'{{LAN_PFX}}'}}.1"
     dns_servers:
-      - 8.8.8.8
+      - 8.8.8.8  # Google's public DNS server for name resolution
+    # ------ Physical Port Configuration ------
+    # ge-0/0/X = Gigabit Ethernet ports on the router
+    # Each port is assigned a role: WAN (uplink to outside) or LAN (local)
     port_config:
-      ge-0/0/0:
-        name: INET
-        usage: wan
+      ge-0/0/0:            # First physical port
+        name: INET          # Label: Internet link
+        usage: wan           # This port connects to the WAN (outside world)
         ip_config:
-          type: dhcp
+          type: dhcp         # Gets its IP automatically from the ISP
+        # VPN tunnels built over this Internet link back to both hubs
         vpn_paths:
-          SunnyvaleHub-INET.OrgOverlay:
+          SunnyvaleHub-INET.OrgOverlay:   # Tunnel to Sunnyvale hub via internet
+            role: spoke                    # This end is the spoke (not the hub)
+            bfd_profile: broadband         # Fast failure detection for broadband
+            key: 1                         # Priority (1 = preferred)
+          CupertinoHub-INET.OrgOverlay:   # Tunnel to Cupertino hub via internet
             role: spoke
             bfd_profile: broadband
-            key: 1
-          CupertinoHub-INET.OrgOverlay:
-            role: spoke
-            bfd_profile: broadband
-            key: 2
-      ge-0/0/1:
-        name: MPLS
-        usage: wan
+            key: 2                         # Priority (2 = backup)
+      ge-0/0/1:            # Second physical port
+        name: MPLS          # Label: Private MPLS link
+        usage: wan           # This port also connects to the WAN
         ip_config:
-          type: static
-          ip: "{{'{{WAN_PFX}}'}}.2"
-          netmask: /24
-          gateway: "{{'{{WAN_PFX}}'}}.1"
+          type: static       # Manually configured IP (MPLS providers usually require this)
+          ip: "{{'{{WAN_PFX}}'}}.2"        # e.g., 192.168.170.2
+          netmask: /24                      # 255.255.255.0 — 254 usable IPs
+          gateway: "{{'{{WAN_PFX}}'}}.1"   # Provider's router, e.g., 192.168.170.1
+        # VPN tunnels built over this MPLS link back to both hubs
         vpn_paths:
           SunnyvaleHub-MPLS.OrgOverlay:
             role: spoke
@@ -42,18 +96,27 @@ wan_edge_templates:
             role: spoke
             bfd_profile: broadband
             key: 2
-      ge-0/0/2:
+      ge-0/0/2:            # Third physical port
         networks:
-          - LAN1
-        usage: lan
+          - LAN1             # Connected to the LAN1 network
+        usage: lan           # This port faces the local network (switches/devices)
+    # ------ Path Preferences ------
+    # Path preferences define the ORDER in which the router tries different
+    # routes to reach a destination. Think of it like GPS route options:
+    # "Take highway first, if blocked take side streets."
     path_preferences:
+      # LBO = Local Breakout: Traffic goes directly to the internet from this
+      # site instead of being sent through a hub first. Faster for web browsing.
+      # Tries Internet first, then MPLS as fallback.
       LBO:
-        strategy: ordered
+        strategy: ordered   # Try paths in order (first available wins)
         paths:
           - name: INET
             type: wan
           - name: MPLS
             type: wan
+      # Same as LBO but prefers MPLS first (for traffic that benefits from
+      # the reliability of a private link)
       LBO_MPLS:
         strategy: ordered
         paths:
@@ -61,23 +124,28 @@ wan_edge_templates:
             type: wan
           - name: INET
             type: wan
+      # LAN = Keep traffic local, don't send it anywhere off-site
       LAN:
         strategy: ordered
         paths:
           - type: local
             networks:
               - LAN1
+      # Overlay_MPLS = Send traffic through VPN tunnels, preferring MPLS-based
+      # tunnels first (more reliable), then fall back to Internet-based tunnels.
+      # Used for inter-site traffic like accessing servers at hub sites.
       Overlay_MPLS:
         strategy: ordered
         paths:
-        - name: SunnyvaleHub-MPLS.OrgOverlay
+        - name: SunnyvaleHub-MPLS.OrgOverlay   # 1st choice: Sunnyvale via MPLS
           type: vpn
-        - name: CupertinoHub-MPLS.OrgOverlay
+        - name: CupertinoHub-MPLS.OrgOverlay   # 2nd choice: Cupertino via MPLS
           type: vpn
-        - name: SunnyvaleHub-INET.OrgOverlay
+        - name: SunnyvaleHub-INET.OrgOverlay   # 3rd choice: Sunnyvale via Internet
           type: vpn
-        - name: CupertinoHub-INET.OrgOverlay
+        - name: CupertinoHub-INET.OrgOverlay   # 4th choice: Cupertino via Internet
           type: vpn
+      # Overlay_INET = Same as above but prefers Internet-based tunnels first
       Overlay_INET:
         strategy: ordered
         paths:
@@ -89,41 +157,62 @@ wan_edge_templates:
           type: vpn
         - name: CupertinoHub-MPLS.OrgOverlay
           type: vpn
+    # ------ DHCP Server Configuration ------
+    # DHCP automatically assigns IP addresses to devices that connect to this
+    # site's LAN. Without DHCP, you'd have to manually configure every device.
     dhcpd_config:
       enabled: True
       LAN1:
         type: local
-        ip_start: 10.99.99.10
-        ip_end: 10.99.99.98
-        gateway: 10.99.99.1
+        ip_start: 10.99.99.10   # First IP to hand out to devices
+        ip_end: 10.99.99.98     # Last IP to hand out (88 devices max)
+        gateway: 10.99.99.1     # Tell devices "this is your way out"
         dns_servers:
-          - 8.8.8.8
+          - 8.8.8.8             # Tell devices "use Google DNS"
+    # ------ Out-of-Band Management ------
+    # OOB = a separate management network for administering the router
+    # itself, independent of production traffic
     oob_ip_config:
       type: dhcp
       node1: {
         type: dhcp
       }
+    # ------ Service Policies (Traffic Rules) ------
+    # Service policies are like firewall rules + routing decisions combined.
+    # They answer: "When traffic from [tenant] wants to reach [service],
+    # should we ALLOW or DENY it, and which PATH should it take?"
+    #
+    # tenant  = source network (where traffic comes FROM)
+    # service = destination app/network (where traffic goes TO)
+    # action  = allow or deny
+    # path_preference = which route to use (see path_preferences above)
+    # local_routing = handle traffic locally without sending to another site
+    # idp.enabled = turn on Intrusion Detection & Prevention scanning
     service_policies:
       - name: Desktop-SSH
+        # Allow SSH access to a desktop from the internet (for remote admin)
         tenants:
         - Internet
         services:
         - Desktop1_SSH
         action: allow
-        path_preference: LAN
+        path_preference: LAN  # Keep it local once it arrives
         idp:
           enabled: false
       - name: Spoke-to-Hub
+        # Allow Durham LAN traffic to reach hub site LANs (Sunnyvale/Cupertino)
+        # e.g., accessing a database server at the data center
         tenants:
-        - LAN1
+        - LAN1             # From: Durham's local network
         services:
-        - LAN3
-        - LAN4
+        - LAN3             # To: Sunnyvale's network
+        - LAN4             # To: Cupertino's network
         action: allow
         idp:
           enabled: false
-        path_preference: Overlay_MPLS
+        path_preference: Overlay_MPLS  # Use VPN tunnel, prefer MPLS
       - name: Hub-to-Spoke
+        # Allow hub sites to send traffic back to Durham
         tenants:
         - LAN3
         - LAN4
@@ -132,26 +221,29 @@ wan_edge_templates:
         action: allow
         idp:
           enabled: false
-        local_routing: true
+        local_routing: true  # Route locally if traffic arrives here
       - name: Spoke-to-Spoke-outbound
+        # Allow Durham to talk to Westford (spoke-to-spoke via hub)
         tenants:
-        - LAN1
+        - LAN1             # From: Durham
         services:
-        - LAN2
+        - LAN2             # To: Westford
         action: allow
         idp:
           enabled: false
-        path_preference: Overlay_MPLS
+        path_preference: Overlay_MPLS  # Goes through hub(s) to reach other spoke
       - name: Spoke-to-Internet
+        # Allow Durham users to browse the internet
         tenants:
         - LAN1
         services:
-        - any
+        - any              # Any destination (the whole internet)
         action: allow
         idp:
           enabled: false
-        path_preference: Overlay_INET
+        path_preference: Overlay_INET  # Go through hub for internet access
       - name: Spoke-to-Spoke-inbound
+        # Allow Westford traffic to reach Durham when it arrives at hub
         tenants:
         - LAN2
         services:
@@ -159,26 +251,34 @@ wan_edge_templates:
         action: allow
         local_routing: true
       - name: Spoke-to-Hub-Services
+        # Allow Durham to reach specific applications hosted at hub sites
+        # (databases, message queues, internal websites)
         tenants:
           - LAN1
         services:
-          - MQTT
-          - MongoDB
-          - Internal_Web
-          - SQL
+          - MQTT           # Message queue (IoT messaging protocol)
+          - MongoDB        # NoSQL database
+          - Internal_Web   # Internal company website
+          - SQL            # SQL database
         action: allow
         path_preference: Overlay_MPLS
         idp:
           enabled: False
       - name: Streaming-Local-INET
+        # Allow streaming media (YouTube, Netflix, etc.) to go directly
+        # to the internet from this site instead of through the hub.
+        # This is called "Local Breakout" — saves bandwidth on the VPN.
         tenants:
           - LAN2
         services:
           - StreamingMedia
         action: allow
-        path_preference: LBO
+        path_preference: LBO   # Local Breakout = direct to internet
         idp:
           enabled: False
+  # ------ Westford Spoke (same pattern as Durham) ------
+  # Westford is the second spoke site. Its config mirrors Durham but uses
+  # LAN2 (10.88.88.0/24) instead of LAN1 and different WAN addressing.
   - name: Westford WAN Edge Template
     type: spoke
     sites:
@@ -337,11 +437,24 @@ wan_edge_templates:
         path_preference: LBO
         idp:
           enabled: False
+# ============================================================================
+# HUB PROFILES (Central Site Router Configurations)
+# ============================================================================
+# Hub profiles configure the central/data center routers. Hubs are where
+# spoke sites connect to and where shared services (databases, web servers)
+# are hosted. In this topology there are TWO hubs for redundancy.
+#
+# Key differences from spokes:
+#   - VPN role is "hub" (not "spoke") on their own tunnels
+#   - They have CBO (Central Breakout) instead of LBO for internet
+#   - They handle spoke-to-spoke traffic routing
+#   - They have hub-to-hub tunnels for inter-hub communication
+#
 hub_profiles:
   - name: SunnyvaleHub
-    type: gateway
-    site: Sunnyvale
-    device: 
+    type: gateway    # Device type: gateway (router)
+    site: Sunnyvale  # Deploy to this site
+    device:          # Which physical router to assign this profile to
       name: SSR-3
       mac: "{{ssr3_mac}}"
     ip_configs:
@@ -350,20 +463,22 @@ hub_profiles:
         ip: "{{'{{LAN_PFX}}'}}.1"
     dns_servers:
       - 8.8.8.8
+    # Hub port config: same concept as spokes, but VPN role = "hub" on
+    # its own tunnels and "spoke" toward the other hub
     port_config:
       ge-0/0/0:
         name: INET
         usage: wan
         ip_config:
-          type: static
+          type: static   # Hubs use static IPs (they need to be reachable)
           ip: "{{'{{WAN1_PFX}}'}}.254"
           netmask: /24
           gateway: "{{'{{WAN1_PFX}}'}}.1"
         vpn_paths:
           SunnyvaleHub-INET.OrgOverlay:
-            role: hub
+            role: hub     # THIS is Sunnyvale, so it's the hub end
           CupertinoHub-INET.OrgOverlay:
-            role: spoke
+            role: spoke   # Toward Cupertino, Sunnyvale acts as spoke
       ge-0/0/1:
         name: MPLS
         usage: wan
@@ -679,107 +794,157 @@ hub_profiles:
         path_preference: Overlay_Hub_MPLS
         idp:
           enabled: false
+# ============================================================================
+# SWITCH TEMPLATES (Ethernet Switch Configurations)
+# ============================================================================
+# Switch templates configure the Juniper EX-series switches at each site.
+# Switches connect all the wired devices (APs, desktops, servers) and use
+# VLANs to logically separate different types of traffic on the same physical
+# cables.
+#
+# Key concepts:
+#   VLAN      = Virtual LAN. Segments one physical network into isolated
+#               logical networks (e.g., guest WiFi vs. employee traffic)
+#   Trunk     = A port that carries MULTIPLE VLANs (tagged traffic)
+#   Access    = A port that carries ONE VLAN (untagged, for end devices)
+#   STP Edge  = Spanning Tree Protocol edge port. Set True for end devices
+#               (PCs, APs) to skip STP negotiation and come up faster.
+#               Set False for switch-to-switch/router links.
+#
 switch_templates:
   - name: Durham Switches
+    # VLANs defined on this switch (IDs come from Mist site variables)
     networks:
-      CLIENT_VLAN:
-        vlan_id: {{'"{{CLIENT_VLAN}}"'}}
-      UPLINK_VLAN_1:
-        vlan_id: {{'"{{UPLINK_VLAN_1}}"'}}
-      UPLINK_VLAN_2:
-        vlan_id: {{'"{{UPLINK_VLAN_2}}"'}}
+      CLIENT_VLAN:                          # For client/management devices
+        vlan_id: {{'"{{CLIENT_VLAN}}"'}}   # e.g., VLAN 100
+      UPLINK_VLAN_1:                        # For AP management traffic
+        vlan_id: {{'"{{UPLINK_VLAN_1}}"'}} # e.g., VLAN 101
+      UPLINK_VLAN_2:                        # For WiFi client data traffic
+        vlan_id: {{'"{{UPLINK_VLAN_2}}"'}} # e.g., VLAN 102
+    # Port usage profiles — reusable templates for switch ports
     port_usages:
-      lab_uplink:
-        mode: trunk
+      lab_uplink:              # Profile for uplink to router (carries all VLANs)
+        mode: trunk            # Trunk = carries multiple VLANs
         port_network: default
         networks:
           - CLIENT_VLAN
           - UPLINK_VLAN_1
           - UPLINK_VLAN_2
-        stp_edge: False
-      wifi_hosts:
-        mode: access
+        stp_edge: False        # Not an edge — connects to another network device
+      wifi_hosts:              # Profile for ports connecting WiFi host devices
+        mode: access           # Access = single VLAN, for end devices
         port_network: UPLINK_VLAN_2
-        stp_edge: True
-      lab_ap:
+        stp_edge: True         # Edge port — device, not a switch
+      lab_ap:                  # Profile for ports connecting Access Points
         mode: access
         port_network: UPLINK_VLAN_1
         stp_edge: True
-      desktops:
-        mode: trunk
+      desktops:                # Profile for desktop/workstation ports
+        mode: trunk            # Trunk so desktops can see multiple VLANs
         port_network: default
         networks:
           - CLIENT_VLAN
           - UPLINK_VLAN_1
           - UPLINK_VLAN_2
         stp_edge: True
+    # Switch matching rules — automatically assign port profiles to
+    # specific switches based on their name (like auto-setup)
     switch_matching:
       enable: True
       rules:
         - name: ex-1
           port_config:
-            ge-0/0/0:
+            ge-0/0/0:          # Port 0: WiFi host device
               usage: wifi_hosts
-            ge-0/0/1:
+            ge-0/0/1:          # Port 1: Access Point
               usage: lab_ap
-            ge-0/0/22:
+            ge-0/0/22:         # Port 22: Desktop/workstation
               usage: desktops
-            ge-0/0/23:
+            ge-0/0/23:         # Port 23: Uplink to router
               usage: lab_uplink
-          match_name[0:4]: EX-1
+          match_name[0:4]: EX-1  # Match switches whose name starts with "EX-1"
+    # Default route: send all traffic to the router gateway
     extra_routes:
-      0.0.0.0/0:
-        via: {{'"{{GW}}"'}}
+      0.0.0.0/0:               # 0.0.0.0/0 = "everything" (default route)
+        via: {{'"{{GW}}"'}}    # Gateway IP (from Mist site variable)
         discard: False
     switch_mgmt:
-      root_password: {{'"{{ROOT_PW}}"'}}
+      root_password: {{'"{{ROOT_PW}}"'}}  # Admin password for the switch
     dns_servers:
       - 8.8.8.8
     sites:
       - Durham
+# ============================================================================
+# WLAN TEMPLATES (Wireless LAN Groupings)
+# ============================================================================
+# WLAN templates group wireless networks (SSIDs) together and apply them
+# to sites. Think of a WLAN template as a "bundle" of WiFi networks.
+#
 wlan_templates:
   - name: Durham WLAN Template
     applies:
-      org_id: {{org_id}}
+      org_id: {{org_id}}  # Apply to this org (Jinja2 injects the real ID)
+
+# ============================================================================
+# RF TEMPLATES (Radio Frequency / WiFi Radio Settings)
+# ============================================================================
+# RF templates control the physical WiFi radio settings:
+#   - Which frequency bands to use (2.4GHz, 5GHz, 6GHz)
+#   - Transmit power levels
+#   - Country code (determines legal frequencies/power)
+#
 rf_templates:
   - name: Lab RF Template
-    country_code: US
+    country_code: US           # Required: determines allowed frequencies
     band_5:
-      disabled: False
-      power: 5
+      disabled: False          # 5GHz band ON (primary band, less interference)
+      power: 5                 # Low power (5 dBm) — lab is small
     band_6:
-      disabled: True
+      disabled: True           # 6GHz band OFF (WiFi 6E, not needed for lab)
     band_24:
-      disabled: True
-    band_24_usage: "5"
+      disabled: True           # 2.4GHz band OFF (more interference, not needed)
+    band_24_usage: "5"         # If 2.4GHz were on, limit its use
     applies:
-      - name: Durham
+      - name: Durham           # Apply this RF template to Durham site
+# ============================================================================
+# WLANs (WiFi Networks / SSIDs)
+# ============================================================================
+# These are the actual WiFi networks that users connect to.
+# Each WLAN has:
+#   - SSID: The WiFi network name users see on their device
+#   - Auth type: How users authenticate (PSK = password, open, 802.1x, etc.)
+#   - Dynamic PSK: Each user/device gets their own unique password
+#   - Rate limiting: Bandwidth caps per client
+#   - Band steering: Push devices to 5GHz (better performance)
+#
 wlans:
-  - ssid: JMA_WLAN_{{org_id[-4:]}}
+  # Primary corporate WLAN with unique per-user passwords
+  - ssid: JMA_WLAN_{{org_id[-4:]}}   # Last 4 chars of org_id make SSID unique
     enabled: True
     bands:
-      - 5
+      - 5                # Only broadcast on 5GHz (less crowded than 2.4GHz)
     band_steer: False
     auth:
-      type: psk
+      type: psk           # Pre-Shared Key (password-based) authentication
     dynamic_psk:
-      enabled: True
-      source: cloud_psks
-      default_psk: juniper123
-      private_wlan: True
+      enabled: True       # Each user gets their own unique password
+      source: cloud_psks  # Passwords managed in Mist cloud
+      default_psk: juniper123  # Fallback password if no personal PSK
+      private_wlan: True  # Each user's traffic is isolated from others
     rateset:
       5:
-        template: high-density
-        min_rssi: 0
-    template: Durham WLAN Template
+        template: high-density  # Optimized for many devices in close proximity
+        min_rssi: 0             # No minimum signal strength required
+    template: Durham WLAN Template  # Attach to this WLAN template
+  # Guest WLAN with bandwidth limits
   - ssid: JMA_Guest_{{org_id[-4:]}}
     enabled: True
     bands:
       - 5
     client_limit_up_enabled: True
-    client_limit_up: 512
+    client_limit_up: 512       # Upload cap: 512 Kbps per guest
     client_limit_down_enabled: True
-    client_limit_down: 1000
+    client_limit_down: 1000    # Download cap: 1 Mbps per guest
     auth:
       type: psk
     dynamic_psk:
@@ -792,60 +957,95 @@ wlans:
         template: high-density
         min_rssi: 0
     template: Durham WLAN Template
+# ============================================================================
+# LABELS (Wireless Tags for Policy Matching)
+# ============================================================================
+# Labels (wxtags) let you tag/categorize wireless clients so you can apply
+# policies to groups. Here we label anyone on the Guest SSID.
+#
 labels:
   - name: Guest
-    for_site: False
+    for_site: False        # Org-level label (not per-site)
     type: match
-    match: "wlan_id"
+    match: "wlan_id"       # Match based on which WiFi network they're on
     op: in
     values:
-      - JMA_GUEST_{{org_id[-4:]}}
+      - JMA_GUEST_{{org_id[-4:]}}  # Match the guest SSID
+
+# ============================================================================
+# WLAN POLICIES (Wireless Traffic Rules)
+# ============================================================================
+# wxrules define what labeled wireless clients are allowed/blocked from doing.
+# Think of these as WiFi-specific firewall rules.
+#
 wxrules:
   - src_wxtags:
-      - Guest
+      - Guest              # Apply to clients labeled "Guest"
     enabled: True
-    action: allow
+    action: allow           # Allow traffic by default...
     template: Durham WLAN Template
     blocked_apps:
-      - bit-torrent
+      - bit-torrent         # ...but block BitTorrent (bandwidth hog)
+# ============================================================================
+# APPLICATIONS (Traffic Classification)
+# ============================================================================
+# Applications define "what" the traffic is. Service policies reference these
+# to decide how to route different types of traffic. There are three types:
+#
+#   custom         = You define the IP addresses and ports yourself
+#   apps           = Pre-built Mist definitions (YouTube, Netflix, etc.)
+#   app_categories = Groups of apps by category (Adult, Games, Malware, etc.)
+#
+# Each application has:
+#   addresses  = IP ranges that define this app (CIDR notation)
+#   specs      = Protocol and port rules
+#   protocol   = tcp, udp, or any
+#   port_range = e.g., "80-80" for HTTP, "443-443" for HTTPS
+#
 applications:
+  # "The whole internet" — matches everything (0.0.0.0/0 = all IPs)
   - name: Internet
     type: custom
     addresses:
-      - 0.0.0.0/0
+      - 0.0.0.0/0       # CIDR: every IP address
     specs:
-      - protocol: any
+      - protocol: any    # Any protocol (TCP, UDP, etc.)
     traffic_type: default
-  - name: LAN1
+
+  # Site LAN networks — used in service policies to say
+  # "traffic from Durham's LAN" or "traffic going to Westford's LAN"
+  - name: LAN1           # Durham's local network
     type: custom
     addresses:
-      - 10.99.99.0/24
+      - 10.99.99.0/24    # All 254 IPs in Durham's subnet
     specs:
       - protocol: any
     traffic_type: default
-  - name: LAN2
+  - name: LAN2           # Westford's local network
     type: custom
     addresses:
       - 10.88.88.0/24
     specs:
       - protocol: any
     traffic_type: default
-  - name: LAN3
+  - name: LAN3           # Sunnyvale hub's local network
     type: custom
     addresses:
       - 10.66.66.0/24
     specs:
       - protocol: any
     traffic_type: default
-  - name: LAN4
+  - name: LAN4           # Cupertino hub's local network
     type: custom
     addresses:
       - 10.55.55.0/24
     specs:
       - protocol: any
     traffic_type: default
+
+  # Content filtering — block categories of harmful/unwanted apps
   - name: Blocklist
-    type: app_categories
+    type: app_categories  # Uses Mist's built-in app category database
     app_categories:
       - Adult
       - Advertisement
@@ -853,91 +1053,115 @@ applications:
       - Malware
       - Violence
     traffic_type: default
+
+  # Specific application definitions for traffic engineering
   - name: SoftwareUpdates
-    type: apps
+    type: apps             # Uses Mist's built-in app signatures
     apps:
-      - ubuntu
+      - ubuntu             # Ubuntu Linux update traffic
     traffic_type: default
   - name: Cloud_MQTT
     type: custom
     addresses:
-      - 192.168.10.254/32
+      - 192.168.10.254/32  # /32 = single host (one specific IP)
     specs:
       - protocol: any
     traffic_type: default
   - name: Desktop1_SSH
     type: custom
     addresses:
-      - 192.168.170.2/32
+      - 192.168.170.2/32   # NAT destination for SSH access
     specs:
       - protocol: tcp
-        port_range: 2222-2222
+        port_range: 2222-2222  # Custom SSH port (not standard 22)
   - name: MQTT
     type: custom
     addresses:
-      - 10.66.66.130/32
+      - 10.66.66.130/32    # MQTT brokers at Sunnyvale hub
       - 10.66.66.131/32
     specs:
       - protocol: tcp
-        port_range: 1883-1883
+        port_range: 1883-1883  # MQTT standard port
     traffic_type: default
   - name: Internal_Web
     type: custom
     addresses:
-      - 10.55.55.129/32
+      - 10.55.55.129/32    # Web servers at Cupertino hub
       - 10.55.55.130/32
       - 10.55.55.131/32
       - 10.55.55.132/32
     specs:
       - protocol: tcp
-        port_range: 80-80
+        port_range: 80-80      # HTTP (port 80)
     traffic_type: default
   - name: SQL
     type: custom
     addresses:
-      - 10.66.66.132/32
+      - 10.66.66.132/32    # SQL server at Sunnyvale hub
     specs:
       - protocol: tcp
-        port_range: 3306-3306
+        port_range: 3306-3306  # MySQL standard port
     traffic_type: default
   - name: MongoDB
     type: custom
     addresses:
-      - 10.66.66.129/32
+      - 10.66.66.129/32    # MongoDB server at Sunnyvale hub
     specs:
       - protocol: tcp
-        port_range: 27017-27019
+        port_range: 27017-27019  # MongoDB port range
     traffic_type: default
   - name: StreamingMedia
-    type: apps
-    apps:
+    type: apps             # Uses Mist's built-in app detection
+    apps:                  # These get Local Breakout treatment (see service policies)
       - youtube
       - netflix
       - hulu
       - amazon-video
     traffic_type: default
+# ============================================================================
+# NETWORKS (LAN/Overlay Network Definitions)
+# ============================================================================
+# Networks define the Layer 3 (IP) networks at each site. These are what the
+# service policies and applications reference when routing traffic.
+#
+# Key fields:
+#   subnet    = IP range for this network (CIDR notation)
+#   isolation = True means devices on this network can't talk to each other
+#               directly — all traffic goes through the router first (security)
+#   vpn_access = Controls how this network participates in the VPN overlay
+#   tenants   = Named endpoints (servers) on this network that service
+#               policies can reference
+#   destNats  = Destination NAT rules: remap incoming traffic to internal IPs
+#               (e.g., expose an internal SSH server on a public port)
+#
+# YAML anchors (&tenants_1) and aliases (*tenants_1) are used to reuse
+# the same tenant definitions in multiple places without copy-pasting.
+#
 networks:
-  - name: LAN1
+  - name: LAN1               # Durham's local network
     #gateway: "{{'{{ LAN_PFX }}'}}.1"
-    subnet: "{{'{{LAN_PFX}}'}}.0/24"
+    subnet: "{{'{{LAN_PFX}}'}}.0/24"   # e.g., 10.99.99.0/24
     ip: "{{'{{LAN_PFX}}'}}.0"
-    prefix: "24"
-    disallow_mist_services: False
-    isolation: True
+    prefix: "24"                        # /24 = 256 IPs (254 usable)
+    disallow_mist_services: False       # Allow Mist cloud management
+    isolation: True                     # Clients isolated from each other
     vpn_access:
-      OrgOverlay:
-        routed: True
+      OrgOverlay:                       # Participate in the org VPN overlay
+        routed: True                    # Advertise this network to other sites
         no_readvertise_to_overlay: False
         no_readvertise_to_lan_bgp: False
         no_readvertise_to_lan_ospf: False
-    tenants: &tenants_1
-      WEB_SERVER_1:
+    tenants: &tenants_1                 # Named servers on this network
+      WEB_SERVER_1:                     # (& creates a reusable YAML anchor)
         addresses:
           - 10.99.99.130
       MQTT_SERVER_1:
         addresses:
           - 10.99.99.131
     #users: *tenants_1
+    # Destination NAT: Makes an internal server accessible from outside.
+    # Here, SSH to 192.168.170.2:2222 gets forwarded to 10.99.99.99:22
+    # (like port forwarding on a home router)
     destNats:
       - name: Desktop1_SSH
         external_ip: 192.168.170.2
@@ -951,7 +1175,7 @@ networks:
           name: Desktop1_SSH
           internal_ip: 10.99.99.99
           port: "22"
-  - name: LAN2
+  - name: LAN2               # Westford's local network
     #gateway: "{{'{{LAN_PFX}}'}}.1"
     subnet: "{{'{{LAN_PFX}}'}}.0/24"
     ip: "{{'{{LAN_PFX}}'}}.0"
@@ -972,7 +1196,7 @@ networks:
         addresses:
           - 10.88.88.131
     #users: *tenants_2
-  - name: LAN3
+  - name: LAN3               # Sunnyvale hub's network (has more servers)
     #gateway: "{{'{{LAN_PFX}}'}}.1"
     subnet: "{{'{{LAN_PFX}}'}}.0/24"
     ip: "{{'{{LAN_PFX}}'}}.0"
@@ -996,7 +1220,7 @@ networks:
         addresses:
           - 10.66.66.132
     #users: *tenants_3
-  - name: LAN4
+  - name: LAN4               # Cupertino hub's network
     #gateway: "{{'{{LAN_PFX}}'}}.1"
     subnet: "{{'{{LAN_PFX}}'}}.0/24"
     ip: "{{'{{LAN_PFX}}'}}.0"
@@ -1020,13 +1244,41 @@ networks:
         addresses:
           - 10.55.55.133
     #users: *tenants_4
+  # Special "catch all" network representing the public internet
   - name: Internet
-    subnet: "0.0.0.0/0"
+    subnet: "0.0.0.0/0"            # Everything outside our private networks
     ip: "0.0.0.0"
     prefix: "0"
     isolation: True
-    disallow_mist_services: True
+    disallow_mist_services: True   # Don't send Mist management over this
+# ============================================================================
+# SITES (Physical Locations)
+# ============================================================================
+# Sites represent physical locations in your organization. Each site has:
+#
+#   info: Basic site metadata (name, address, GPS coordinates)
+#     - managed: True = Mist cloud manages devices at this site
+#     - country_code: Required for RF compliance (legal WiFi power/channels)
+#
+#   settings.vars: Site-specific variables that Mist substitutes into
+#     templates at deployment time. This is how ONE template can produce
+#     DIFFERENT configs per site. For example:
+#       LAN_PFX: 10.99.99    → Durham gets 10.99.99.0/24
+#       LAN_PFX: 10.88.88    → Westford gets 10.88.88.0/24
+#
+#   settings.rogue: Rogue AP detection settings
+#     - Detects unauthorized access points near your site
+#     - honeypot_enabled: Creates decoy APs to detect attackers
+#
+#   assignments: Which physical devices belong to this site
+#     - edges: WAN routers (SSRs)
+#     - aps: Wireless access points
+#     - switches: Ethernet switches
+#     - MAC addresses are Jinja2 variables from config/env.yml
+#
 sites:
+  # ------ Durham (Spoke Site) ------
+  # Full-featured spoke with router, switch, and access point
   - info:
       name: Durham
       address: 111 Spoke Ave, Durham, NC 27705
@@ -1037,27 +1289,29 @@ sites:
       country_code: US
     settings:
       vars:
-        CLIENT_VLAN: {{mgmt_vlan}}
-        UPLINK_VLAN_1: {{vlan_1}}
-        UPLINK_VLAN_2: {{vlan_2}}
-        LAN_PFX: 10.99.99
-        GW: {{ex_gateway}}
-        WAN_PFX: 192.168.170
+        CLIENT_VLAN: {{mgmt_vlan}}       # Management/client VLAN ID
+        UPLINK_VLAN_1: {{vlan_1}}        # AP management VLAN ID
+        UPLINK_VLAN_2: {{vlan_2}}        # WiFi data VLAN ID
+        LAN_PFX: 10.99.99               # Durham's LAN subnet prefix
+        GW: {{ex_gateway}}               # Switch default gateway
+        WAN_PFX: 192.168.170             # Durham's MPLS WAN prefix
       rogue:
-        min_rssi: -85
-        min_duration: 1
+        min_rssi: -85          # Minimum signal strength to flag as rogue
+        min_duration: 1        # Minimum minutes before alerting
         enabled: True
-        honeypot_enabled: True
+        honeypot_enabled: True # Deploy decoy APs to catch attackers
     assignments:
       edges:
         - name: SSR-1
-          mac: "{{ssr1_mac}}"
+          mac: "{{ssr1_mac}}"   # Jinja2 replaces with real MAC from env.yml
       aps:
         - name: AP-1
           mac: "{{ap1_mac}}"
       switches:
         - name: EX-1
           mac: "{{ex1_mac}}"
+  # ------ Westford (Spoke Site) ------
+  # Simpler spoke: router only (no local switch or AP)
   - info:
       name: Westford
       address: 51 Main St, Westford, MA 01886
@@ -1077,6 +1331,10 @@ sites:
       edges:
         - name: SSR-2
           mac: "{{ssr2_mac}}"
+  # ------ Sunnyvale (Hub Site) ------
+  # Primary hub: aggregates spoke traffic, hosts databases & MQTT
+  # Hub sites have WAN1_PFX and WAN2_PFX (two WAN links with static IPs)
+  # plus WAN1_PUBIP (public IP for the INET interface)
   - info:
       name: Sunnyvale
       address: 1133 Innovation Way, Sunnyvale, CA 94089
@@ -1098,6 +1356,8 @@ sites:
       edges:
         - name: SSR-3
           mac: "{{ssr3_mac}}"
+  # ------ Cupertino (Hub Site) ------
+  # Secondary hub: provides redundancy, hosts web servers
   - info:
       name: Cupertino
       address: 1610 S De Anza Blvd, San Jose, CA 95129
@@ -1119,12 +1379,20 @@ sites:
       edges:
         - name: SSR-4
           mac: "{{ssr4_mac}}"
+# ============================================================================
+# PRE-SHARED KEYS (WiFi Passwords)
+# ============================================================================
+# Organization-level PSKs that can be assigned to users/devices.
+# Each PSK is tied to a specific SSID and has a role and expiration.
+# With Dynamic PSK, each user gets their own unique password for tracking
+# and security (revoke one user without changing everyone's password).
+#
 psks:
-  - name: iot-key-1
-    ssid: JMA_WLAN_{{org_id[-4:]}}
-    role: IoT
-    expiry_days: 30
-  - name: guest-key-1
+  - name: iot-key-1                     # Key for IoT devices
+    ssid: JMA_WLAN_{{org_id[-4:]}}      # Which WiFi network this key works on
+    role: IoT                            # Device role (for policy matching)
+    expiry_days: 30                      # Auto-expires after 30 days
+  - name: guest-key-1                   # Key for guest users
     ssid: JMA_Guest_{{org_id[-4:]}}
     role: Guest
     expiry_days: 30

@@ -70,9 +70,6 @@ ZEROIZE_ENABLED = False  # Set to True to enable zeroization
 
 if ZEROIZE_ENABLED:
     print("\n⚠️  ZEROIZATION ENABLED - This will delete all configurations!")
-    print("Starting in 3 seconds... (Ctrl+C to cancel)")
-    import time
-    time.sleep(3)
     
     # Create session first for zeroize
     temp_session = mistapi.APISession(apitoken=token, host=env['host'])
@@ -118,14 +115,14 @@ templates_dir = project_root / "templates"
 labs_dir = project_root / "labs"
 output_file = labs_dir / "09_deployment_vars.yml"
 
-# Check if deployment_vars.yml template exists
-template_file = templates_dir / "deployment_vars.yml"
+# Check if deployment_vars.yml.j2 template exists
+template_file = templates_dir / "deployment_vars.yml.j2"
 if template_file.exists():
     print(f"Loading Jinja2 template from: {template_file}")
     
     # Load and render template
     environment = Environment(loader=FileSystemLoader(str(templates_dir)))
-    template = environment.get_template("deployment_vars.yml")
+    template = environment.get_template("deployment_vars.yml.j2")
     output = template.render(env)
     
     # Write source-of-truth to file
@@ -197,29 +194,27 @@ else:
 if 'sites' in data and data['sites']:
     sites_data = data['sites']
     existing_sites = mist.orgs.sites.listOrgSites(session, org_id=org_id).data
+    existing_sites_by_name = {s['name']: s for s in existing_sites}
     
     for site_config in sites_data:
-        # Extract site info from nested structure
         site_info = site_config.get('info', site_config)
         site_name = site_info.get('name', 'Unknown')
-        existing_site = next(filter(lambda s: s.get('name') == site_name, existing_sites), None)
+        existing_site = existing_sites_by_name.get(site_name)
         
         if existing_site:
-            print(f"Site '{site_name}' already exists, updating...")
             site = mist.sites.sites.updateSiteInfo(
                 session, 
                 site_id=existing_site['id'], 
                 body=site_info
             ).data
-            print(f"  Updated site: {site['name']} (ID: {site['id']})")
+            print(f"✓ Updated site: {site['name']} (ID: {site['id']})")
         else:
-            print(f"Creating site: {site_name}")
             site = mist.orgs.sites.createOrgSite(
                 session, 
                 org_id=org_id, 
                 body=site_info
             ).data
-            print(f"  Created site: {site['name']} (ID: {site['id']})")
+            print(f"✓ Created site: {site['name']} (ID: {site['id']})")
     
     print(f"\nSite creation complete. Total sites: {len(sites_data)}")
 else:
@@ -273,13 +268,6 @@ if 'sites' in data and data['sites']:
 #
 # Navigate to each site and verify Site Variables have been created.
 
-print("\n" + "="*80)
-print("Manual Validation: Site Variables")
-print("="*80)
-print("1. Navigate to: Organization > Site Configuration")
-print("2. Click on each site and scroll to 'Site Variables'")
-print("3. Verify variables are configured correctly")
-print("="*80 + "\n")
 
 # ### Step 3.5 - Assign Devices to Sites
 #
