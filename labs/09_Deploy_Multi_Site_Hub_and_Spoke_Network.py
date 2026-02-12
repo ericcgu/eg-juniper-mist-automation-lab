@@ -23,13 +23,22 @@
 # - `time` - for time-related operations
 
 # %%
+import sys
+from pathlib import Path
+
+# Ensure project root is in sys.path for utils import
+current_file = Path(__file__).resolve()
+project_root = current_file.parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 import mistapi
 from mistapi.api import v1 as mist
 from jinja2 import Environment, FileSystemLoader
 import importlib
 import utils
 importlib.reload(utils)
-from utils import load_config_from_yaml
+from utils import load_config_from_yaml, zeroize_organization
 
 # ### Step 1.2 - Load Environment Variables
 #
@@ -48,22 +57,33 @@ print(f"Using token: {token[:8]}...")
 
 # ### Step 1.3 - Zeroize Environment (Optional)
 #
-# For this lab, it's best to start with a clean slate. If you have a `zeroize.py` script, 
-# you can run it to remove all existing configurations for your organization without 
-# releasing any adopted devices.
+# For this lab, it's best to start with a clean slate. The zeroize utility will remove 
+# all existing configurations for your organization without releasing any adopted devices.
 #
 # This step is OPTIONAL and should only be run if you want to completely reset your 
-# environment. Comment out or skip this step if you want to keep existing configurations.
+# environment. Set ZEROIZE_ENABLED to True to enable this step.
 #
-# Manual Step: Run `python zeroize.py` in a terminal if available, or skip this step.
+# **WARNING**: This will delete ALL configurations in your organization!
 
-print("\n" + "="*80)
-print("IMPORTANT: Zeroize Step")
-print("="*80)
-print("If you want to start with a clean environment, run 'python zeroize.py' manually.")
-print("This will remove all configurations without releasing adopted devices.")
-print("Skip this step if you want to keep existing configurations.")
-print("="*80 + "\n")
+# %%
+ZEROIZE_ENABLED = False  # Set to True to enable zeroization
+
+if ZEROIZE_ENABLED:
+    print("\n⚠️  ZEROIZATION ENABLED - This will delete all configurations!")
+    print("Starting in 3 seconds... (Ctrl+C to cancel)")
+    import time
+    time.sleep(3)
+    
+    # Create session first for zeroize
+    temp_session = mistapi.APISession(apitoken=token, host=env['host'])
+    temp_session.login()
+    
+    # Run zeroization
+    summary = zeroize_organization(temp_session, org_id, verbose=True)
+    print("\n✓ Zeroization completed successfully")
+else:
+    print("\n⏭️  Zeroization DISABLED - Skipping cleanup step")
+    print("   Set ZEROIZE_ENABLED = True in Step 1.3 to enable")
 
 # ### Step 1.4 - Setup API Session
 #
@@ -95,20 +115,17 @@ import yaml
 
 # Define paths
 templates_dir = project_root / "templates"
-output_dir = project_root / "labs" / "L09"
-output_file = output_dir / "deployment_vars.yml"
+labs_dir = project_root / "labs"
+output_file = labs_dir / "09_deployment_vars.yml"
 
-# Create output directory if it doesn't exist
-output_dir.mkdir(parents=True, exist_ok=True)
-
-# Check if template exists
-template_file = templates_dir / "deployment_vars.yml.j2"
+# Check if deployment_vars.yml template exists
+template_file = templates_dir / "deployment_vars.yml"
 if template_file.exists():
     print(f"Loading Jinja2 template from: {template_file}")
     
     # Load and render template
     environment = Environment(loader=FileSystemLoader(str(templates_dir)))
-    template = environment.get_template("deployment_vars.yml.j2")
+    template = environment.get_template("deployment_vars.yml")
     output = template.render(env)
     
     # Write source-of-truth to file
@@ -182,7 +199,9 @@ if 'sites' in data and data['sites']:
     existing_sites = mist.orgs.sites.listOrgSites(session, org_id=org_id).data
     
     for site_config in sites_data:
-        site_name = site_config.get('name', 'Unknown')
+        # Extract site info from nested structure
+        site_info = site_config.get('info', site_config)
+        site_name = site_info.get('name', 'Unknown')
         existing_site = next(filter(lambda s: s.get('name') == site_name, existing_sites), None)
         
         if existing_site:
@@ -190,7 +209,7 @@ if 'sites' in data and data['sites']:
             site = mist.sites.sites.updateSiteInfo(
                 session, 
                 site_id=existing_site['id'], 
-                body=site_config
+                body=site_info
             ).data
             print(f"  Updated site: {site['name']} (ID: {site['id']})")
         else:
@@ -198,7 +217,7 @@ if 'sites' in data and data['sites']:
             site = mist.orgs.sites.createOrgSite(
                 session, 
                 org_id=org_id, 
-                body=site_config
+                body=site_info
             ).data
             print(f"  Created site: {site['name']} (ID: {site['id']})")
     
@@ -233,15 +252,18 @@ if 'sites' in data and data['sites']:
     sites = mist.orgs.sites.listOrgSites(session, org_id=org_id).data
     
     for site_config in sites_data:
-        site_name = site_config.get('name', 'Unknown')
+        # Extract site info and settings from nested structure
+        site_info = site_config.get('info', site_config)
+        site_settings = site_config.get('settings', {})
+        site_name = site_info.get('name', 'Unknown')
         site = next(filter(lambda s: s.get('name') == site_name, sites), None)
         
-        if site and 'settings' in site_config:
+        if site and site_settings:
             print(f"Configuring variables for site: {site_name}")
             settings = mist.sites.setting.updateSiteSettings(
                 session, 
                 site_id=site['id'], 
-                body=site_config['settings']
+                body=site_settings
             ).data
             print(f"  Variables configured for {site_name}")
     
@@ -276,7 +298,10 @@ if 'sites' in data and data['sites']:
     sites = mist.orgs.sites.listOrgSites(session, org_id=org_id).data
     
     for site_config in sites_data:
-        site_name = site_config.get('name', 'Unknown')
+        # Extract site info and assignments from nested structure
+        site_info = site_config.get('info', site_config)
+        assignments = site_config.get('assignments', site_config)
+        site_name = site_info.get('name', 'Unknown')
         site = next(filter(lambda s: s.get('name') == site_name, sites), None)
         
         if not site:
@@ -286,8 +311,9 @@ if 'sites' in data and data['sites']:
         print(f"\nAssigning devices to site: {site_name}")
         
         # Assign APs
-        if 'aps' in site_config:
-            for ap_mac in site_config['aps']:
+        if 'aps' in assignments:
+            for ap_assignment in assignments['aps']:
+                ap_mac = ap_assignment.get('mac', ap_assignment) if isinstance(ap_assignment, dict) else ap_assignment
                 clean_mac = "".join(ap_mac.split(":"))
                 ap = next(filter(lambda a: a.get('mac') == clean_mac, aps), None)
                 
@@ -306,8 +332,9 @@ if 'sites' in data and data['sites']:
                     print(f"  Assigned AP: {clean_mac}")
         
         # Assign Switches
-        if 'switches' in site_config:
-            for sw_mac in site_config['switches']:
+        if 'switches' in assignments:
+            for sw_assignment in assignments['switches']:
+                sw_mac = sw_assignment.get('mac', sw_assignment) if isinstance(sw_assignment, dict) else sw_assignment
                 clean_mac = "".join(sw_mac.split(":"))
                 sw = next(filter(lambda s: s.get('mac') == clean_mac, switches), None)
                 
@@ -326,8 +353,9 @@ if 'sites' in data and data['sites']:
                     print(f"  Assigned Switch: {clean_mac}")
         
         # Assign Gateways
-        if 'edges' in site_config:
-            for edge_mac in site_config['edges']:
+        if 'edges' in assignments:
+            for edge_assignment in assignments['edges']:
+                edge_mac = edge_assignment.get('mac', edge_assignment) if isinstance(edge_assignment, dict) else edge_assignment
                 clean_mac = "".join(edge_mac.split(":"))
                 edge = next(filter(lambda e: e.get('mac') == clean_mac, edges), None)
                 

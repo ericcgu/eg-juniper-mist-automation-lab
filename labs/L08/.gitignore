@@ -1,7 +1,0 @@
-# Ignore certificate files (sensitive)
-*.crt
-*.pem
-*.key
-
-# Keep README and structure
-!README.md

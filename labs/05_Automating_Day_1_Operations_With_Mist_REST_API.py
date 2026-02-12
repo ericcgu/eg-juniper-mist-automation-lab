@@ -19,7 +19,14 @@
 # - `load_config_from_yaml` - shared helper from our project
 # - `time` - for delays where needed
 
-# %%
+# %%import sys
+from pathlib import Path
+
+# Ensure project root is in sys.path for utils import
+current_file = Path(__file__).resolve()
+project_root = current_file.parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 import mistapi
 from mistapi.api import v1 as mist
 from pprint import pprint
