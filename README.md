@@ -1,3 +1,7 @@
+
+## Project Screenshot
+![Juniper Mist Automation Lab Screenshot](mist_lab.png)
+
 # Juniper Mist Automation Lab
 
 A comprehensive hands-on lab environment for learning Juniper Mist API automation using Python. This project provides interactive Jupyter-style notebooks (`.py` files) that demonstrate how to automate Juniper Mist operations including device adoption, site configuration, and network management.
