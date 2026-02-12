@@ -20,25 +20,14 @@
 # - `time` - for delays where needed
 
 # %%
-import sys
-from pathlib import Path
-
-# Ensure project root is in sys.path for utils import
-current_file = Path(__file__).resolve()
-project_root = current_file.parents[1]
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
 import mistapi
 from mistapi.api import v1 as mist
 from pprint import pprint
 import time
-
-# Reload utils module to pick up changes
 import importlib
 import utils
 importlib.reload(utils)
-from utils import load_config_from_yaml, save_config_to_yaml
+from utils import load_config_from_yaml
 
 # ### Step 1.2 - Load Environment Variables
 #
@@ -688,7 +677,7 @@ print("\n" + "="*60)
 print("LAB 5 DEPLOYMENT SUMMARY")
 print("="*60)
 print(f"Durham Site ID: {site_id}")
-print(f"Durham Site Address: 111 Spoke Ave, Durham, NC 27705")
+print("Durham Site Address: 111 Spoke Ave, Durham, NC 27705")
 print("\nDeployed Components:")
 print("------------------")
 print("✓ Durham site created/updated")
@@ -715,7 +704,7 @@ print("  - ge-0/0/1: lab_ap")
 print("  - ge-0/0/22: desktops")
 print("  - ge-0/0/23: lab_uplink")
 
-print(f"\nWireless:")
+print("\nWireless:")
 print(f"  - SSID: JMA_WLAN_{org_id[-4:]}")
 print("  - PSK: juniper123")
 print("  - Band: 5GHz only")

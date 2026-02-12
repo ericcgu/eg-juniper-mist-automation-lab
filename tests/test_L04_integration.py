@@ -4,7 +4,6 @@ These tests run against a real Mist environment.
 Requires valid .env and config/env.yml with real credentials.
 """
 
-import pytest
 from mistapi.api import v1 as mist
 
 

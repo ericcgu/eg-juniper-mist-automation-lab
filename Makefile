@@ -1,3 +1,10 @@
+# Lint code with ruff
+.PHONY: lint
+lint:
+	@echo "Linting and auto-fixing Python files with ruff..."
+	@$(UV) run ruff check --fix .
+	@echo "Lint complete!"
+
 # Makefile for Juniper Mist Automation Lab
 # Cross-platform support for Windows and macOS/Linux
 # Uses uv for fast Python package management

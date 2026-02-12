@@ -20,25 +20,13 @@
 
 # %%
 
-import sys
-from pathlib import Path
-
-# Ensure project root is in sys.path for utils import
-current_file = Path(__file__).resolve()
-project_root = current_file.parents[1]
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
 import mistapi
 from mistapi.api import v1 as mist
 from pprint import pprint
-import time
-
-# Reload utils module to pick up changes
 import importlib
 import utils
 importlib.reload(utils)
-from utils import load_config_from_yaml, save_config_to_yaml
+from utils import load_config_from_yaml
 
 # ### Step 1.2 - Load Environment Variables
 #
