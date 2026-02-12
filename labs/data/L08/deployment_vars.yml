@@ -1,0 +1,1122 @@
+---
+wan_edge_templates:
+  - name: Durham WAN Edge Template
+    type: spoke
+    sites:
+      - Durham
+    ip_configs:
+      LAN1:
+        type: static
+        ip: "{{LAN_PFX}}.1"
+    dns_servers:
+      - 8.8.8.8
+    port_config:
+      ge-0/0/0:
+        name: INET
+        usage: wan
+        ip_config:
+          type: dhcp
+        vpn_paths:
+          SunnyvaleHub-INET.OrgOverlay:
+            role: spoke
+            bfd_profile: broadband
+            key: 1
+          CupertinoHub-INET.OrgOverlay:
+            role: spoke
+            bfd_profile: broadband
+            key: 2
+      ge-0/0/1:
+        name: MPLS
+        usage: wan
+        ip_config:
+          type: static
+          ip: "{{WAN_PFX}}.2"
+          netmask: /24
+          gateway: "{{WAN_PFX}}.1"
+        vpn_paths:
+          SunnyvaleHub-MPLS.OrgOverlay:
+            role: spoke
+            bfd_profile: broadband
+            key: 1
+          CupertinoHub-MPLS.OrgOverlay:
+            role: spoke
+            bfd_profile: broadband
+            key: 2
+      ge-0/0/2:
+        networks:
+          - LAN1
+        usage: lan
+    path_preferences:
+      LBO:
+        strategy: ordered
+        paths:
+          - name: INET
+            type: wan
+          - name: MPLS
+            type: wan
+      LBO_MPLS:
+        strategy: ordered
+        paths:
+          - name: MPLS
+            type: wan
+          - name: INET
+            type: wan
+      LAN:
+        strategy: ordered
+        paths:
+          - type: local
+            networks:
+              - LAN1
+      Overlay_MPLS:
+        strategy: ordered
+        paths:
+        - name: SunnyvaleHub-MPLS.OrgOverlay
+          type: vpn
+        - name: CupertinoHub-MPLS.OrgOverlay
+          type: vpn
+        - name: SunnyvaleHub-INET.OrgOverlay
+          type: vpn
+        - name: CupertinoHub-INET.OrgOverlay
+          type: vpn
+      Overlay_INET:
+        strategy: ordered
+        paths:
+        - name: SunnyvaleHub-INET.OrgOverlay
+          type: vpn
+        - name: CupertinoHub-INET.OrgOverlay
+          type: vpn
+        - name: SunnyvaleHub-MPLS.OrgOverlay
+          type: vpn
+        - name: CupertinoHub-MPLS.OrgOverlay
+          type: vpn
+    dhcpd_config:
+      enabled: True
+      LAN1:
+        type: local
+        ip_start: 10.99.99.10
+        ip_end: 10.99.99.98
+        gateway: 10.99.99.1
+        dns_servers:
+          - 8.8.8.8
+    oob_ip_config:
+      type: dhcp
+      node1: {
+        type: dhcp
+      }
+    service_policies:
+      - name: Desktop-SSH
+        tenants:
+        - Internet
+        services:
+        - Desktop1_SSH
+        action: allow
+        path_preference: LAN
+        idp:
+          enabled: false
+      - name: Spoke-to-Hub
+        tenants:
+        - LAN1
+        services:
+        - LAN3
+        - LAN4
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_MPLS
+      - name: Hub-to-Spoke
+        tenants:
+        - LAN3
+        - LAN4
+        services:
+        - LAN1
+        action: allow
+        idp:
+          enabled: false
+        local_routing: true
+      - name: Spoke-to-Spoke-outbound
+        tenants:
+        - LAN1
+        services:
+        - LAN2
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_MPLS
+      - name: Spoke-to-Internet
+        tenants:
+        - LAN1
+        services:
+        - any
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_INET
+      - name: Spoke-to-Spoke-inbound
+        tenants:
+        - LAN2
+        services:
+        - LAN1
+        action: allow
+        local_routing: true
+      - name: Spoke-to-Hub-Services
+        tenants:
+          - LAN1
+        services:
+          - MQTT
+          - MongoDB
+          - Internal_Web
+          - SQL
+        action: allow
+        path_preference: Overlay_MPLS
+        idp:
+          enabled: False
+      - name: Streaming-Local-INET
+        tenants:
+          - LAN1
+        services:
+          - StreamingMedia
+        action: allow
+        path_preference: LBO
+        idp:
+          enabled: False
+  - name: Westford WAN Edge Template
+    type: spoke
+    sites:
+      - Westford
+    ip_configs:
+      LAN2:
+        type: static
+        ip: "{{LAN_PFX}}.1"
+    dns_servers:
+      - 8.8.8.8
+    port_config:
+      ge-0/0/0:
+        name: INET
+        usage: wan
+        ip_config:
+          type: dhcp
+        vpn_paths:
+          SunnyvaleHub-INET.OrgOverlay:
+            role: spoke
+            bfd_profile: broadband
+            key: 1
+          CupertinoHub-INET.OrgOverlay:
+            role: spoke
+            bfd_profile: broadband
+            key: 2
+      ge-0/0/1:
+        name: MPLS
+        usage: wan
+        ip_config:
+          type: static
+          ip: "{{WAN_PFX}}.2"
+          netmask: /24
+          gateway: "{{WAN_PFX}}.1"
+        vpn_paths:
+          SunnyvaleHub-MPLS.OrgOverlay:
+            role: spoke
+            bfd_profile: broadband
+            key: 1
+          CupertinoHub-MPLS.OrgOverlay:
+            role: spoke
+            bfd_profile: broadband
+            key: 2
+      ge-0/0/2:
+        networks:
+          - LAN2
+        usage: lan
+    path_preferences:
+      LBO:
+        strategy: ordered
+        paths:
+          - name: INET
+            type: wan
+          - name: MPLS
+            type: wan
+      LBO_MPLS:
+        strategy: ordered
+        paths:
+          - name: MPLS
+            type: wan
+          - name: INET
+            type: wan
+      LAN:
+        strategy: ordered
+        paths:
+          - type: local
+            networks:
+              - LAN2
+      Overlay_MPLS:
+        strategy: ordered
+        paths:
+        - name: SunnyvaleHub-MPLS.OrgOverlay
+          type: vpn
+        - name: CupertinoHub-MPLS.OrgOverlay
+          type: vpn
+        - name: SunnyvaleHub-INET.OrgOverlay
+          type: vpn
+        - name: CupertinoHub-INET.OrgOverlay
+          type: vpn
+      Overlay_INET:
+        strategy: ordered
+        paths:
+        - name: SunnyvaleHub-INET.OrgOverlay
+          type: vpn
+        - name: CupertinoHub-INET.OrgOverlay
+          type: vpn
+        - name: SunnyvaleHub-MPLS.OrgOverlay
+          type: vpn
+        - name: CupertinoHub-MPLS.OrgOverlay
+          type: vpn
+    service_policies:
+      - name: Spoke-to-Hub
+        tenants:
+        - LAN2
+        services:
+        - LAN3
+        - LAN4
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_MPLS
+      - name: Hub-to-Spoke
+        tenants:
+        - LAN3
+        - LAN4
+        services:
+        - LAN2
+        action: allow
+        idp:
+          enabled: false
+        local_routing: true
+      - name: Spoke-to-Spoke-outbound
+        tenants:
+        - LAN2
+        services:
+        - LAN1
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_MPLS
+      - name: Spoke-to-Internet
+        tenants:
+        - LAN2
+        services:
+        - any
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_INET
+      - name: Spoke-to-Spoke-inbound
+        tenants:
+        - LAN1
+        services:
+        - LAN2
+        action: allow
+        local_routing: true
+        idp:
+          enabled: false
+      - name: Spoke-to-Hub-Services
+        tenants:
+          - LAN2
+        services:
+          - MQTT
+          - MongoDB
+          - Internal_Web
+          - SQL
+        action: allow
+        path_preference: Overlay_MPLS
+        idp:
+          enabled: False
+      - name: Streaming-Local-INET
+        tenants:
+          - LAN1
+        services:
+          - StreamingMedia
+        action: allow
+        path_preference: LBO
+        idp:
+          enabled: False
+hub_profiles:
+  - name: SunnyvaleHub
+    type: gateway
+    site: Sunnyvale
+    device: 
+      name: SSR-3
+      mac: "02:00:01:c9:50:f8"
+    ip_configs:
+      LAN3:
+        type: static
+        ip: "{{LAN_PFX}}.1"
+    dns_servers:
+      - 8.8.8.8
+    port_config:
+      ge-0/0/0:
+        name: INET
+        usage: wan
+        ip_config:
+          type: static
+          ip: "{{WAN1_PFX}}.254"
+          netmask: /24
+          gateway: "{{WAN1_PFX}}.1"
+        vpn_paths:
+          SunnyvaleHub-INET.OrgOverlay:
+            role: hub
+          CupertinoHub-INET.OrgOverlay:
+            role: spoke
+      ge-0/0/1:
+        name: MPLS
+        usage: wan
+        ip_config:
+          type: static
+          ip: "{{WAN2_PFX}}.254"
+          netmask: /24
+          gateway: "{{WAN2_PFX}}.1"
+        vpn_paths:
+          SunnyvaleHub-MPLS.OrgOverlay:
+            role: hub
+          CupertinoHub-MPLS.OrgOverlay:
+            role: spoke
+      ge-0/0/2:
+        networks:
+          - LAN3
+        usage: lan
+    path_preferences:
+      CBO:
+        strategy: ordered
+        paths:
+          - name: INET
+            type: wan
+          - name: MPLS
+            type: wan
+      Overlay_MPLS:
+        strategy: ordered
+        paths:
+          - name: SunnyvaleHub-MPLS.OrgOverlay
+            type: vpn
+          - name: SunnyvaleHub-INET.OrgOverlay
+            type: vpn
+      Overlay_INET:
+        strategy: ordered
+        paths:
+          - name: SunnyvaleHub-INET.OrgOverlay
+            type: vpn
+          - name: SunnyvaleHub-MPLS.OrgOverlay
+            type: vpn
+      Overlay_Hub_INET:
+        strategy: ordered
+        paths:
+          - name: CupertinoHub-INET.OrgOverlay
+            type: vpn
+          - name: CupertinoHub-MPLS.OrgOverlay
+            type: vpn
+      Overlay_Hub_MPLS:
+        strategy: ordered
+        paths:
+          - name: CupertinoHub-MPLS.OrgOverlay
+            type: vpn
+          - name: CupertinoHub-INET.OrgOverlay
+            type: vpn
+    service_policies:
+      - name: Spoke-to-Hub
+        tenants:
+        - LAN1
+        - LAN2
+        services:
+        - LAN3
+        action: allow
+        idp:
+          enabled: false
+        local_routing: true
+      - name: Hub-to-Spoke
+        tenants:
+        - LAN3
+        services:
+        - LAN1
+        - LAN2
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_MPLS
+      - name: Spoke-to-Spoke
+        tenants:
+        - LAN1
+        - LAN2
+        services:
+        - LAN1
+        - LAN2
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_MPLS
+      - name: Hub-to-Hub-outbound
+        tenants:
+        - LAN3
+        services:
+        - LAN4
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_Hub_MPLS
+      - name: Spokes-to-Internet
+        tenants:
+        - LAN1
+        - LAN2
+        services:
+        - any
+        action: allow
+        path_preference: CBO
+        idp:
+          enabled: false
+      - name: Hub-to-Internet
+        tenants:
+        - LAN3
+        services:
+        - Internet
+        action: allow
+        path_preference: CBO
+        idp:
+          enabled: false
+      - name: Hub-to-Hub-inbound
+        tenants:
+        - LAN4
+        services:
+        - LAN3
+        action: allow
+        local_routing: true
+        idp:
+          enabled: false
+      - name: All-to-Hub1-Services
+        tenants:
+        - LAN1
+        - LAN2
+        - LAN4
+        services:
+        - MongoDB
+        - MQTT
+        - SQL
+        action: allow
+        local_routing: true
+        idp:
+          enabled: false
+      - name: Hub1-to-Hub2-Services
+        tenants:
+        - LAN3
+        services:
+        - Internal_Web
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_Hub_MPLS
+  - name: CupertinoHub
+    type: gateway
+    site: Cupertino
+    device: 
+      name: SSR-4
+      mac: "02:00:01:88:dc:71"
+    ip_configs:
+      LAN4:
+        type: static
+        ip: "{{LAN_PFX}}.1"
+    dns_servers:
+      - 8.8.8.8
+    port_config:
+      ge-0/0/0:
+        name: INET
+        usage: wan
+        ip_config:
+          type: static
+          ip: "{{WAN1_PFX}}.254"
+          netmask: /24
+          gateway: "{{WAN1_PFX}}.1"
+        wan_ext_ip: "{{WAN1_PUBIP}}"
+        vpn_paths:
+          SunnyvaleHub-INET.OrgOverlay:
+            role: spoke
+          CupertinoHub-INET.OrgOverlay:
+            role: hub
+      ge-0/0/1:
+        name: MPLS
+        usage: wan
+        ip_config:
+          type: static
+          ip: "{{WAN2_PFX}}.254"
+          netmask: /24
+          gateway: "{{WAN2_PFX}}.1"
+        vpn_paths:
+          SunnyvaleHub-MPLS.OrgOverlay:
+            role: spoke
+          CupertinoHub-MPLS.OrgOverlay:
+            role: hub
+      ge-0/0/2:
+        networks:
+          - LAN4
+        usage: lan
+    path_preferences:
+      CBO:
+        strategy: ordered
+        paths:
+          - name: INET
+            type: wan
+          - name: MPLS
+            type: wan
+      Overlay_MPLS:
+        strategy: ordered
+        paths:
+        - name: CupertinoHub-MPLS.OrgOverlay
+          type: vpn
+        - name: CupertinoHub-INET.OrgOverlay
+          type: vpn
+      Overlay_INET:
+        strategy: ordered
+        paths:
+        - name: CupertinoHub-INET.OrgOverlay
+          type: vpn
+        - name: CupertinoHub-MPLS.OrgOverlay
+          type: vpn
+      Overlay_Hub_MPLS:
+        strategy: ordered
+        paths:
+        - name: SunnyvaleHub-MPLS.OrgOverlay
+          type: vpn
+        - name: SunnyvaleHub-INET.OrgOverlay
+          type: vpn
+      Overlay_Hub_INET:
+        strategy: ordered
+        paths:
+        - name: SunnyvaleHub-INET.OrgOverlay
+          type: vpn
+        - name: SunnyvaleHub-MPLS.OrgOverlay
+          type: vpn
+    service_policies:
+      - name: Spoke-to-Hub
+        tenants:
+        - LAN1
+        - LAN2
+        services:
+        - LAN4
+        action: allow
+        idp:
+          enabled: false
+        local_routing: true
+      - name: Hub-to-Spoke
+        tenants:
+        - LAN4
+        services:
+        - LAN1
+        - LAN2
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_MPLS
+      - name: Spoke-to-Spoke
+        tenants:
+        - LAN1
+        - LAN2
+        services:
+        - LAN1
+        - LAN2
+        action: allow
+        idp:
+          enabled: false
+        path_preference: Overlay_MPLS
+      - name: Hub-to-Hub-inbound
+        tenants:
+        - LAN3
+        services:
+        - LAN4
+        action: allow
+        idp:
+          enabled: false
+        local_routing: true
+      - name: Spokes-to-Internet
+        tenants:
+        - LAN1
+        - LAN2
+        services:
+        - any
+        action: allow
+        path_preference: CBO
+        idp:
+          enabled: false
+      - name: Hub-to-Internet
+        tenants:
+        - LAN4
+        services:
+        - Internet
+        action: allow
+        path_preference: CBO
+        idp:
+          enabled: false
+      - name: Hub-to-Hub-outbound
+        tenants:
+        - LAN4
+        services:
+        - LAN3
+        action: allow
+        path_preference: Overlay_Hub_MPLS
+        idp:
+          enabled: false 
+      - name: All-to-InternalWeb
+        tenants:
+        - LAN1
+        - LAN2
+        - LAN3
+        services:
+        - Internal_Web
+        action: allow
+        local_routing: true
+        idp:
+          enabled: false
+      - name: Hub2-to-Hub1-Services
+        tenants:
+        - LAN4
+        services:
+        - MongoDB
+        - MQTT
+        - SQL
+        action: allow
+        path_preference: Overlay_Hub_MPLS
+        idp:
+          enabled: false
+switch_templates:
+  - name: Durham Switches
+    networks:
+      CLIENT_VLAN:
+        vlan_id: "{{CLIENT_VLAN}}"
+      UPLINK_VLAN_1:
+        vlan_id: "{{UPLINK_VLAN_1}}"
+      UPLINK_VLAN_2:
+        vlan_id: "{{UPLINK_VLAN_2}}"
+    port_usages:
+      lab_uplink:
+        mode: trunk
+        port_network: default
+        networks:
+          - CLIENT_VLAN
+          - UPLINK_VLAN_1
+          - UPLINK_VLAN_2
+        stp_edge: False
+      wifi_hosts:
+        mode: access
+        port_network: UPLINK_VLAN_2
+        stp_edge: True
+      lab_ap:
+        mode: access
+        port_network: UPLINK_VLAN_1
+        stp_edge: True
+      desktops:
+        mode: trunk
+        port_network: default
+        networks:
+          - CLIENT_VLAN
+          - UPLINK_VLAN_1
+          - UPLINK_VLAN_2
+        stp_edge: True
+    switch_matching:
+      enable: True
+      rules:
+        - name: ex-1
+          port_config:
+            ge-0/0/0:
+              usage: wifi_hosts
+            ge-0/0/1:
+              usage: lab_ap
+            ge-0/0/22:
+              usage: desktops
+            ge-0/0/23:
+              usage: lab_uplink
+          match_name[0:4]: EX-1
+    extra_routes:
+      0.0.0.0/0:
+        via: "{{GW}}"
+        discard: False
+    switch_mgmt:
+      root_password: "{{ROOT_PW}}"
+    dns_servers:
+      - 8.8.8.8
+    sites:
+      - Durham
+wlan_templates:
+  - name: Durham WLAN Template
+    applies:
+      org_id: 6e1c1d71-71fb-4575-bb4e-c2a3235fb257
+rf_templates:
+  - name: Lab RF Template
+    country_code: US
+    band_5:
+      disabled: False
+      power: 5
+    band_6:
+      disabled: True
+    band_24:
+      disabled: True
+    band_24_usage: "5"
+    applies:
+      - name: Durham
+wlans:
+  - ssid: JMA_WLAN_b257
+    enabled: True
+    bands:
+      - 5
+    band_steer: False
+    auth:
+      type: psk
+    dynamic_psk:
+      enabled: True
+      source: cloud_psks
+      default_psk: juniper123
+      private_wlan: True
+    rateset:
+      5:
+        template: high-density
+        min_rssi: 0
+    template: Durham WLAN Template
+  - ssid: JMA_Guest_b257
+    enabled: True
+    bands:
+      - 5
+    client_limit_up_enabled: True
+    client_limit_up: 512
+    client_limit_down_enabled: True
+    client_limit_down: 1000
+    auth:
+      type: psk
+    dynamic_psk:
+      enabled: True
+      source: cloud_psks
+      default_psk: juniper123
+      private_wlan: True
+    rateset:
+      5:
+        template: high-density
+        min_rssi: 0
+    template: Durham WLAN Template
+labels:
+  - name: Guest
+    for_site: False
+    type: match
+    match: "wlan_id"
+    op: in
+    values:
+      - JMA_GUEST_b257
+wxrules:
+  - src_wxtags:
+      - Guest
+    enabled: True
+    action: allow
+    template: Durham WLAN Template
+    blocked_apps:
+      - bit-torrent
+applications:
+  - name: Internet
+    type: custom
+    addresses:
+      - 0.0.0.0/0
+    specs:
+      - protocol: any
+    traffic_type: default
+  - name: LAN1
+    type: custom
+    addresses:
+      - 10.99.99.0/24
+    specs:
+      - protocol: any
+    traffic_type: default
+  - name: LAN2
+    type: custom
+    addresses:
+      - 10.88.88.0/24
+    specs:
+      - protocol: any
+    traffic_type: default
+  - name: LAN3
+    type: custom
+    addresses:
+      - 10.66.66.0/24
+    specs:
+      - protocol: any
+    traffic_type: default
+  - name: LAN4
+    type: custom
+    addresses:
+      - 10.55.55.0/24
+    specs:
+      - protocol: any
+    traffic_type: default
+  - name: Blocklist
+    type: app_categories
+    app_categories:
+      - Adult
+      - Advertisement
+      - Games
+      - Malware
+      - Violence
+    traffic_type: default
+  - name: SoftwareUpdates
+    type: apps
+    apps:
+      - ubuntu
+    traffic_type: default
+  - name: Cloud_MQTT
+    type: custom
+    addresses:
+      - 192.168.10.254/32
+    specs:
+      - protocol: any
+    traffic_type: default
+  - name: Desktop1_SSH
+    type: custom
+    addresses:
+      - 192.168.170.2/24
+    specs:
+      - protocol: tcp
+        port_range: 2222-2222
+  - name: MQTT
+    type: custom
+    addresses:
+      - 10.66.66.130/32
+      - 10.66.66.131/32
+    specs:
+      - protocol: tcp
+        port_range: 1883-1883
+    traffic_type: default
+  - name: Internal_Web
+    type: custom
+    addresses:
+      - 10.55.55.129/32
+      - 10.55.55.130/32
+      - 10.55.55.131/32
+      - 10.55.55.132/32
+    specs:
+      - protocol: tcp
+        port_range: 80-80
+    traffic_type: default
+  - name: SQL
+    type: custom
+    addresses:
+      - 10.66.66.132/32
+    specs:
+      - protocol: tcp
+        port_range: 3306-3306
+    traffic_type: default
+  - name: MongoDB
+    type: custom
+    addresses:
+      - 10.66.66.129/32
+    specs:
+      - protocol: tcp
+        port_range: 27017-27019
+    traffic_type: default
+  - name: StreamingMedia
+    type: apps
+    apps:
+      - youtube
+      - netflix
+      - hulu
+      - amazon-video
+    traffic_type: default
+networks:
+  - name: LAN1
+    subnet: "{{LAN_PFX}}.0/24"
+    ip: "{{LAN_PFX}}.0"
+    prefix: "24"
+    disallow_mist_services: False
+    isolation: True
+    vpn_access:
+      OrgOverlay:
+        routed: True
+        no_readvertise_to_overlay: False
+        no_readvertise_to_lan_bgp: False
+        no_readvertise_to_lan_ospf: False
+    tenants: &tenants_1
+      WEB_SERVER_1:
+        addresses:
+          - 10.99.99.130
+      MQTT_SERVER_1:
+        addresses:
+          - 10.99.99.131
+    destNats:
+      name: Desktop1_SSH
+      external_ip: 192.168.170.2
+      external_port: "2222"
+      internal_ip: 10.99.99.99
+      port: "22"
+      applies_to: underlay
+    internet_access:
+      destination_nat:
+        "192.168.170.2:2222":
+          name: Desktop1_SSH
+          internal_ip: 10.99.99.99
+          port: "22"
+  - name: LAN2
+    subnet: "{{LAN_PFX}}.0/24"
+    ip: "{{LAN_PFX}}.0"
+    prefix: "24"
+    disallow_mist_services: False
+    isolation: True
+    vpn_access:
+      OrgOverlay:
+        routed: True
+        no_readvertise_to_overlay: False
+        no_readvertise_to_lan_bgp: False
+        no_readvertise_to_lan_ospf: False
+    tenants: &tenants_2
+      WEB_SERVER_2:
+        addresses:
+          - 10.88.88.130
+      MQTT_SERVER_2:
+        addresses:
+          - 10.88.88.131
+  - name: LAN3
+    subnet: "{{LAN_PFX}}.0/24"
+    ip: "{{LAN_PFX}}.0"
+    prefix: "24"
+    disallow_mist_services: False
+    isolation: True
+    vpn_access:
+      OrgOverlay:
+        routed: True
+        no_readvertise_to_overlay: False
+        no_readvertise_to_lan_bgp: False
+        no_readvertise_to_lan_ospf: False
+    tenants: &tenants_3
+      WEB_SERVER_3:
+        addresses:
+          - 10.66.66.130
+      MQTT_SERVER_3:
+        addresses:
+          - 10.66.66.131
+      SQL_SERVER_3:
+        addresses:
+          - 10.66.66.132
+  - name: LAN4
+    subnet: "{{LAN_PFX}}.0/24"
+    ip: "{{LAN_PFX}}.0"
+    prefix: "24"
+    disallow_mist_services: False
+    isolation: True
+    vpn_access:
+      OrgOverlay:
+        routed: True
+        no_readvertise_to_overlay: False
+        no_readvertise_to_lan_bgp: False
+        no_readvertise_to_lan_ospf: False
+    tenants: &tenants_4
+      WEB_SERVER_4:
+        addresses:
+          - 10.55.55.130
+      MQTT_SERVER_4:
+        addresses:
+          - 10.55.55.131
+      MONGO_SERVER_4:
+        addresses:
+          - 10.55.55.133
+  - name: Internet
+    subnet: "0.0.0.0/0"
+    ip: "0.0.0.0"
+    prefix: "0"
+    isolation: True
+    disallow_mist_services: True
+sites:
+  - info:
+      name: Durham
+      address: 111 Spoke Ave, Durham, NC 27705
+      latlng:
+        lat: 36.020475097827116
+        lng: -78.91700322940933
+      managed: True
+      country_code: US
+    settings:
+      vars:
+        CLIENT_VLAN: 1661
+        UPLINK_VLAN_1: 802
+        UPLINK_VLAN_2: 803
+        LAN_PFX: 10.99.99
+        GW: 10.210.14.14
+        WAN_PFX: 192.168.170
+      rogue:
+        min_rssi: -85
+        min_duration: 1
+        enabled: True
+        honeypot_enabled: True
+    assignments:
+      edges:
+        - name: SSR-1
+          mac: "02:00:01:da:8e:e6"
+      aps:
+        - name: AP-1
+          mac: "a8f7d933c55c"
+      switches:
+        - name: EX-1
+          mac: "bc0ffe135a80"
+  - info:
+      name: Westford
+      address: 51 Main St, Westford, MA 01886
+      latlng:
+        lat: 42.5817788
+        lng: -71.4384615
+      managed: True
+      country_code: US
+    settings:
+      vars:
+        CLIENT_VLAN: 1661
+        UPLINK_VLAN_1: 802
+        UPLINK_VLAN_2: 803
+        LAN_PFX: 10.88.88
+        WAN_PFX: 192.168.130
+    assignments:
+      edges:
+        - name: SSR-2
+          mac: "02:00:01:a3:61:6a"
+  - info:
+      name: Sunnyvale
+      address: 1133 Innovation Way, Sunnyvale, CA 94089
+      latlng:
+        lat: 37.397871
+        lng: -122.045623
+      managed: True
+      country_code: US
+    settings:
+      vars:
+        CLIENT_VLAN: 1661
+        UPLINK_VLAN_1: 802
+        UPLINK_VLAN_2: 803
+        LAN_PFX: 10.66.66
+        WAN1_PFX: 192.168.191
+        WAN2_PFX: 192.168.190
+        WAN1_PUBIP: 192.168.129.191
+    assignments:
+      edges:
+        - name: SSR-3
+          mac: "02:00:01:c9:50:f8"
+  - info:
+      name: Cupertino
+      address: 1610 S De Anza Blvd, San Jose, CA 95129
+      latlng:
+        lat: 37.3016882
+        lng: -122.0390353
+      managed: True
+      country_code: US
+    settings:
+      vars:
+        CLIENT_VLAN: 1661
+        UPLINK_VLAN_1: 802
+        UPLINK_VLAN_2: 803
+        LAN_PFX: 10.55.55
+        WAN1_PFX: 192.168.201
+        WAN2_PFX: 192.168.200
+        WAN1_PUBIP: 192.168.129.201
+    assignments:
+      edges:
+        - name: SSR-4
+          mac: "02:00:01:88:dc:71"
+psks:
+  - name: iot-key-1
+    ssid: JMA_WLAN_b257
+    role: IoT
+    expiry_days: 30
+  - name: guest-key-1
+    ssid: JMA_Guest_b257
+    role: Guest
+    expiry_days: 30
