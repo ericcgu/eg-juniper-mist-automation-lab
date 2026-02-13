@@ -59,7 +59,7 @@ install-uv:
 .PHONY: venv
 venv:
 	@echo "Creating virtual environment for $(DETECTED_OS) using uv..."
-	@$(UV) venv $(VENV_DIR)
+	@$(UV) venv $(VENV_DIR) --python 3.12
 	@echo "Virtual environment created in $(VENV_DIR)/"
 
 # Install dependencies using uv
